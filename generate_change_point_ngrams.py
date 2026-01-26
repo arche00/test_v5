@@ -16,9 +16,13 @@ from svg_parser_module import (
     generate_and_save_ngram_chunks_change_point
 )
 
-def generate_ngrams_for_all_grid_strings():
+def generate_ngrams_for_all_grid_strings(window_sizes=[10, 11, 12]):
     """
     change_point_ngram.db의 모든 grid_string에 대해 ngram_chunks_change_point 생성
+    지정된 윈도우 크기만 생성 (기존에 없는 윈도우 크기만)
+    
+    Args:
+        window_sizes: 생성할 윈도우 크기 리스트 (기본값: [10, 11, 12])
     """
     # 테이블 생성 확인
     print("테이블 생성 확인 중...")
@@ -29,6 +33,8 @@ def generate_ngrams_for_all_grid_strings():
     except Exception as e:
         print(f"⚠️ 테이블 생성 중 오류 (계속 진행): {str(e)}")
     
+    print()
+    print(f"윈도우 크기 {window_sizes}로 N-gram 생성합니다...")
     print()
     
     conn = get_change_point_db_connection()
@@ -49,33 +55,41 @@ def generate_ngrams_for_all_grid_strings():
         print("-" * 60)
         
         processed_count = 0
+        skipped_count = 0
         error_count = 0
         
         for record_id, grid_string in all_records:
             try:
-                # 이미 ngram_chunks_change_point가 있는지 확인
-                cursor.execute('''
-                    SELECT COUNT(*) FROM ngram_chunks_change_point 
-                    WHERE grid_string_id = ?
-                ''', (record_id,))
+                # 각 윈도우 크기별로 이미 있는지 확인
+                missing_window_sizes = []
+                for window_size in window_sizes:
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM ngram_chunks_change_point 
+                        WHERE grid_string_id = ? AND window_size = ?
+                    ''', (record_id, window_size))
+                    
+                    existing_count = cursor.fetchone()[0]
+                    if existing_count == 0:
+                        missing_window_sizes.append(window_size)
                 
-                existing_count = cursor.fetchone()[0]
-                
-                if existing_count > 0:
-                    print(f"ID {record_id}: 이미 ngram_chunks_change_point가 존재합니다. (건너뜀)")
+                # 모든 윈도우 크기가 이미 있으면 건너뜀
+                if not missing_window_sizes:
+                    skipped_count += 1
+                    print(f"ID {record_id}: 모든 윈도우 크기({window_sizes})가 이미 존재합니다. (건너뜀)")
                     continue
                 
-                # ngram_chunks_change_point 생성
+                # 없는 윈도우 크기만 생성
                 result = generate_and_save_ngram_chunks_change_point(
                     record_id,
                     grid_string,
-                    window_sizes=[5, 6, 7, 8, 9]
+                    window_sizes=missing_window_sizes,
+                    conn=conn
                 )
                 
                 total_ngrams = sum(result.values())
                 processed_count += 1
                 
-                print(f"ID {record_id}: {total_ngrams}개의 ngram 생성 완료")
+                print(f"ID {record_id}: {total_ngrams}개의 ngram 생성 완료 (윈도우 크기: {missing_window_sizes})")
                 print(f"  - 윈도우별: {result}")
                 
             except Exception as e:
@@ -85,8 +99,8 @@ def generate_ngrams_for_all_grid_strings():
         print("-" * 60)
         print(f"처리 완료!")
         print(f"  - 성공: {processed_count}개")
+        print(f"  - 건너뜀: {skipped_count}개")
         print(f"  - 오류: {error_count}개")
-        print(f"  - 건너뜀: {total_count - processed_count - error_count}개")
         
     except Exception as e:
         print(f"오류 발생: {str(e)}")
@@ -102,4 +116,5 @@ if __name__ == "__main__":
     print("=" * 60)
     print()
     
-    generate_ngrams_for_all_grid_strings()
+    # 윈도우 크기 10, 11, 12 생성
+    generate_ngrams_for_all_grid_strings(window_sizes=[10, 11, 12])
